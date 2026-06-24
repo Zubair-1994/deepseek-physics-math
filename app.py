@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from datetime import datetime
 import streamlit as st
 from openai import OpenAI
@@ -32,18 +33,52 @@ def get_client():
 
 client = get_client()
 
-def sanitize_latex(text: str) -> str:
+DISPLAY_MATH_PATTERN = re.compile(r"(?s)(\$\$(.*?)\$\$|\\\[(.*?)\\\])")
+
+def normalize_latex_text(text: str) -> str:
     """
-    Converts typical DeepSeek variations of LaTeX wrappers to Streamlit-compatible 
-    delimiters ($ and $$) to enforce rendering engine accuracy.
+    Normalizes common inline math delimiters while leaving display math blocks
+    available for st.latex rendering.
     """
     if not text:
         return ""
-    # Convert block equations
-    text = text.replace(r"\[", "$$").replace(r"\]", "$$")
-    # Convert inline equations
+    text = text.replace("\r\n", "\n")
     text = text.replace(r"\(", "$").replace(r"\)", "$")
     return text
+
+def clean_display_latex(latex: str) -> str:
+    latex = latex.strip()
+    latex = re.sub(r"\\begin\{align\*?\}", r"\\begin{aligned}", latex)
+    latex = re.sub(r"\\end\{align\*?\}", r"\\end{aligned}", latex)
+
+    for env in ("equation", "equation*", "displaymath"):
+        begin = rf"\begin{{{env}}}"
+        end = rf"\end{{{env}}}"
+        if latex.startswith(begin) and latex.endswith(end):
+            return latex[len(begin):-len(end)].strip()
+    return latex
+
+def render_response(text: str):
+    """
+    Renders markdown text and display equations separately. This is more stable
+    on Streamlit Cloud than sending mixed markdown and $$...$$ blocks through
+    st.markdown in one pass.
+    """
+    text = normalize_latex_text(text)
+    cursor = 0
+
+    for match in DISPLAY_MATH_PATTERN.finditer(text):
+        markdown_chunk = text[cursor:match.start()]
+        if markdown_chunk.strip():
+            st.markdown(markdown_chunk)
+
+        latex = match.group(2) if match.group(2) is not None else match.group(3)
+        st.latex(clean_display_latex(latex))
+        cursor = match.end()
+
+    trailing_chunk = text[cursor:]
+    if trailing_chunk.strip():
+        st.markdown(trailing_chunk)
 
 # ---------------------------------------------------------
 # CONVERSATION STORAGE HANDLERS
@@ -97,6 +132,8 @@ Core behavior:
 Math and formatting rules:
 - Always reply in clean markdown.
 - Wrap inline math in $...$ and display equations in $$...$$.
+- Put display equations on their own lines, separated from surrounding text by blank lines.
+- Do not place display equations inside bullet points, numbered-list lines, tables, or block quotes.
 - Use aligned display equations for multi-line derivations.
 - Define symbols before using them unless they are standard in the user's problem.
 - Avoid unsupported leaps such as 'clearly', 'obviously', or 'it is easy to show' for important steps.
@@ -185,7 +222,7 @@ if session_options:
 for msg in st.session_state.messages:
     if msg["role"] != "system":
         with st.chat_message(msg["role"]):
-            st.markdown(sanitize_latex(msg["content"]))
+            render_response(msg["content"])
 
 # Await immediate prompt interactions
 if user_prompt := st.chat_input("Input problem statement or equation query..."):
@@ -204,9 +241,8 @@ if user_prompt := st.chat_input("Input problem statement or equation query..."):
                 stream=False
             )
             raw_reply = response.choices[0].message.content
-            sanitized_reply = sanitize_latex(raw_reply)
             
-            st.markdown(sanitized_reply)
+            render_response(raw_reply)
             st.session_state.messages.append({"role": "assistant", "content": raw_reply})
             
             # Immediately persist session mutations to local disk storage
