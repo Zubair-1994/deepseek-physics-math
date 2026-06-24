@@ -14,17 +14,19 @@ if not os.path.exists(HISTORY_DIR):
 
 # Page Layout configuration
 st.set_page_config(page_title="DeepSeek LaTeX Chatbot", layout="wide")
-st.title("🤖 DeepSeek Math")
+st.title("🤖 DeepSeek Physics & Math")
 
 def get_client():
-    try:
-        api_key = st.secrets.get("DEEPSEEK_API_KEY")
-    except FileNotFoundError:
-        api_key = None
+    user_api_key = st.sidebar.text_input("DeepSeek API Key", type="password")
 
-    api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
+    try:
+        owner_api_key = st.secrets.get("DEEPSEEK_API_KEY")
+    except FileNotFoundError:
+        owner_api_key = None
+
+    api_key = user_api_key or owner_api_key or os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
-        st.error("CRITICAL ERROR: DEEPSEEK_API_KEY is not defined in Streamlit secrets or your environment.")
+        st.error("Enter a DeepSeek API key in the sidebar to use the app.")
         st.stop()
     return OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
