@@ -113,6 +113,21 @@ def save_chat_titles(titles):
 def default_chat_title(session_id):
     return session_id.replace("chat_", "Chat ") if session_id.startswith("chat_") else session_id
 
+def rename_chat_title(session_id, title):
+    st.session_state.chat_titles[session_id] = title
+    save_chat_titles(st.session_state.chat_titles)
+
+def delete_chat_title(session_id):
+    if session_id in st.session_state.chat_titles:
+        del st.session_state.chat_titles[session_id]
+        save_chat_titles(st.session_state.chat_titles)
+
+def delete_chat_session(session_id):
+    file_path = os.path.join(HISTORY_DIR, f"{session_id}.json")
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    delete_chat_title(session_id)
+
 SYSTEM_PROMPT = """You are a careful mathematics and physics tutor for undergraduate and graduate students.
 
 Your main job is to derive equations, solve exercises, and explain reasoning step by step. Adapt the depth and pace to the user's level and the problem's difficulty.
@@ -161,6 +176,9 @@ def start_new_conversation():
 if "chat_titles" not in st.session_state:
     st.session_state.chat_titles = load_chat_titles()
 
+if st.session_state.pop("start_new_after_delete", False):
+    start_new_conversation()
+
 # Step 1: Handle a fresh conversation initialization request
 if "current_session" not in st.session_state or st.sidebar.button("➕ Start New Conversation"):
     st.session_state.current_session = f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -207,12 +225,37 @@ if session_options:
     renamed_title = st.sidebar.text_input(
         "Chat Title",
         value=active_title,
-        key=f"title_input_{st.session_state.current_session}",
+        key=f"title_input_{st.session_state.current_session}_{active_title}",
     ).strip()
 
-    if renamed_title and renamed_title != active_title:
-        st.session_state.chat_titles[st.session_state.current_session] = renamed_title
-        save_chat_titles(st.session_state.chat_titles)
+    title_action_cols = st.sidebar.columns(2)
+    if title_action_cols[0].button(
+        "Rename",
+        key=f"rename_title_{st.session_state.current_session}",
+        disabled=not renamed_title or renamed_title == active_title,
+    ):
+        rename_chat_title(st.session_state.current_session, renamed_title)
+        st.rerun()
+
+    if title_action_cols[1].button(
+        "Delete Title",
+        key=f"delete_title_{st.session_state.current_session}",
+        disabled=st.session_state.current_session not in st.session_state.chat_titles,
+    ):
+        delete_chat_title(st.session_state.current_session)
+        st.rerun()
+
+    confirm_delete = st.sidebar.checkbox(
+        "Confirm chat deletion",
+        key=f"confirm_delete_{st.session_state.current_session}",
+    )
+    if st.sidebar.button(
+        "Delete Chat",
+        key=f"delete_chat_{st.session_state.current_session}",
+        disabled=not confirm_delete,
+    ):
+        delete_chat_session(st.session_state.current_session)
+        st.session_state.start_new_after_delete = True
         st.rerun()
 
 # ---------------------------------------------------------
